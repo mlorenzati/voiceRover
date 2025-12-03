@@ -1,0 +1,9 @@
+[submodule "lib/pico-tflmicro"]
+	path = lib/pico-tflmicro
+	url = git@github.com:raspberrypi/pico-tflmicro.git
+[submodule "lib/microphone-library-for-pico"]
+	path = lib/microphone-library-for-pico
+	url = git@github.com:ArmDeveloperEcosystem/microphone-library-for-pico.git
+[submodule "lib/CMSIS_5"]
+	path = lib/CMSIS_5
+	url = git@github.com:ARM-software/CMSIS_5.git

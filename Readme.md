@@ -86,3 +86,18 @@ python -m venv tflenv && source tflenv/bin/activate
 pip install --upgrade pip
 pip install tensorflow numpy soundfile librosa
 ```
+
+# Project build
+Patch pico-tflmicro just once
+```
+cd lib/pico-tflmicro
+patch -p1 -N -r - < ../../patches/pico_tflmicro_limits_fix.patch   
+```
+
+Run cmake and make
+```
+mkdir build
+cd build
+cmake ..
+make -j4
+```
