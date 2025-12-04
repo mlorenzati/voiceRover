@@ -22,6 +22,10 @@ set(CONFIGTABLE ON)
 set(RFFT_Q15_256 ON)
 set(ALLFAST ON)
 
+# Microphone capture type
+set(MIC_SETUP_VALUE 2)  # 1 = PDM, 2 = ANALOG
+add_definitions(-DMIC_SETUP=${MIC_SETUP_VALUE})
+
 # include CMSIS-DSP .cmake for GCC Toolchain
 include(${DSP}/Toolchain/GCC.cmake)
 
@@ -35,12 +39,23 @@ add_executable(pico_voice_rover
     ${CMAKE_CURRENT_LIST_DIR}/src/ml_model.cpp
 )
 
-target_link_libraries(pico_voice_rover
+set(VOICE_ROVER_LINK_LIST
     pico_stdlib
     hardware_pwm
     pico-tflmicro
-    pico_pdm_microphone
     CMSISDSPTransform CMSISDSPSupport CMSISDSPCommon CMSISDSPComplexMath CMSISDSPFastMath CMSISDSPBasicMath
+)
+
+if(MIC_SETUP_VALUE STREQUAL "1")     # 1 = PDM
+    list(APPEND VOICE_ROVER_LINK_LIST pico_pdm_microphone)
+elseif(MIC_SETUP_VALUE STREQUAL "2") # 2 = ANALOG
+    list(APPEND VOICE_ROVER_LINK_LIST pico_analog_microphone)
+else()
+    message(FATAL_ERROR "Unknown MIC_TYPE: ${MIC_TYPE}")
+endif()
+
+target_link_libraries(pico_voice_rover
+    ${VOICE_ROVER_LINK_LIST}
 )
 
 # enable usb output, disable uart output

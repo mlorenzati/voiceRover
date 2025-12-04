@@ -10,8 +10,15 @@
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 
+#define MIC_SETUP_PDM     1
+#define MIC_SETUP_ANALOG  2
+
 extern "C" {
-#include "pico/pdm_microphone.h"
+#if MIC_SETUP == MIC_SETUP_PDM
+    #include "pico/pdm_microphone.h"
+#elif MIC_SETUP == MIC_SETUP_ANALOG 
+    #include "pico/analog_microphone.h"
+#endif
 }
 
 #include "tflite_model.h"
@@ -20,13 +27,17 @@ extern "C" {
 #include "ml_model.h"
 
 // constants
-#define SAMPLE_RATE       16000
+#define SAMPLE_RATE       8000
 #define FFT_SIZE          256
-#define SPECTRUM_SHIFT    4
+#define HOP_SIZE          80
+#define SPECTRUM_SHIFT    ((FFT_SIZE + HOP_SIZE - 1) / HOP_SIZE)
 #define INPUT_BUFFER_SIZE ((FFT_SIZE / 2) * SPECTRUM_SHIFT)
 #define INPUT_SHIFT       0
+#define BIAS_VOLTAGE      1.65
+#define TENSOR_ARENA_SIZE 64 * 1024
 
 // microphone configuration
+#if MIC_SETUP == MIC_SETUP_PDM
 const struct pdm_microphone_config pdm_config = {
     // GPIO pin for the PDM DAT signal
     .gpio_data = 2,
@@ -46,6 +57,16 @@ const struct pdm_microphone_config pdm_config = {
     // number of samples to buffer
     .sample_buffer_size = INPUT_BUFFER_SIZE,
 };
+#elif MIC_SETUP == MIC_SETUP_ANALOG
+const struct analog_microphone_config analog_config {
+    .gpio = 26,
+    .bias_voltage = BIAS_VOLTAGE,
+    .sample_rate = SAMPLE_RATE,
+    .sample_buffer_size = INPUT_BUFFER_SIZE
+};
+#else 
+#error "MIC_SETUP not defined!"
+#endif
 
 q15_t capture_buffer_q15[INPUT_BUFFER_SIZE];
 volatile int new_samples_captured = 0;
@@ -53,20 +74,23 @@ volatile int new_samples_captured = 0;
 q15_t input_q15[INPUT_BUFFER_SIZE + (FFT_SIZE / 2)];
 
 DSPPipeline dsp_pipeline(FFT_SIZE);
-MLModel ml_model(tflite_model, 128 * 1024);
+
+static uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
+
+MLModel ml_model(tflite_model, TENSOR_ARENA_SIZE);
 
 int8_t* scaled_spectrum = nullptr;
 int32_t spectogram_divider;
 float spectrogram_zero_point;
 
-void on_pdm_samples_ready();
+void on_mic_samples_ready();
 
 int main( void )
 {
     // initialize stdio
     stdio_init_all();
 
-    printf("hello pico fire alarm detection\n");
+    printf("hello pico Voice Rover!\n");
 
     gpio_set_function(PICO_DEFAULT_LED_PIN, GPIO_FUNC_PWM);
     
@@ -93,6 +117,7 @@ int main( void )
     spectogram_divider = 64 * ml_model.input_scale(); 
     spectrogram_zero_point = ml_model.input_zero_point();
 
+#if MIC_SETUP == MIC_SETUP_PDM
     // initialize the PDM microphone
     if (pdm_microphone_init(&pdm_config) < 0) {
         printf("PDM microphone initialization failed!\n");
@@ -101,13 +126,30 @@ int main( void )
 
     // set callback that is called when all the samples in the library
     // internal sample buffer are ready for reading
-    pdm_microphone_set_samples_ready_handler(on_pdm_samples_ready);
-
+    pdm_microphone_set_samples_ready_handler(on_mic_samples_ready);
+    
     // start capturing data from the PDM microphone
     if (pdm_microphone_start() < 0) {
         printf("PDM microphone start failed!\n");
         while (1) { tight_loop_contents(); }
     }
+#elif MIC_SETUP == MIC_SETUP_ANALOG
+    // initialize the PDM microphone
+    if (analog_microphone_init(&analog_config) < 0) {
+        printf("Analog microphone initialization failed!\n");
+        while (1) { tight_loop_contents(); }
+    }
+
+    // set callback that is called when all the samples in the library
+    // internal sample buffer are ready for reading
+    analog_microphone_set_samples_ready_handler(on_mic_samples_ready);
+    
+    // start capturing data from the PDM microphone
+    if (analog_microphone_start() < 0) {
+        printf("PDM microphone start failed!\n");
+        while (1) { tight_loop_contents(); }
+    }
+#endif
 
     while (1) {
         // wait for new samples
@@ -146,11 +188,15 @@ int main( void )
     return 0;
 }
 
-void on_pdm_samples_ready()
-{
-    // callback from library when all the samples in the library
-    // internal sample buffer are ready for reading 
-
-    // read in the new samples
+// callback from library when all the samples in the library
+// internal sample buffer are ready for reading 
+// read in the new samples
+#if MIC_SETUP == MIC_SETUP_PDM
+void on_mic_samples_ready() {
     new_samples_captured = pdm_microphone_read(capture_buffer_q15, INPUT_BUFFER_SIZE);
 }
+#elif MIC_SETUP == MIC_SETUP_ANALOG
+void on_mic_samples_ready() {
+    new_samples_captured = analog_microphone_read(capture_buffer_q15, INPUT_BUFFER_SIZE);
+}
+#endif

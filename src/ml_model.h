@@ -15,6 +15,7 @@
 class MLModel {
     public:
         MLModel(const unsigned char tflite_model[], int tensor_arena_size);
+        MLModel(const unsigned char tflite_model[], uint8_t* tensor_arena_ptr, int tensor_arena_size);
         virtual ~MLModel();
 
         int init();
@@ -24,6 +25,7 @@ class MLModel {
         float input_scale() const;
         int32_t input_zero_point() const;
     private:
+        bool _static_alloc;
         const unsigned char* _tflite_model;
         int _tensor_arena_size;
 

@@ -10,6 +10,17 @@
 
 #include "ml_model.h"
 
+MLModel::MLModel(const unsigned char tflite_model[], uint8_t* tensor_arena_ptr, int tensor_arena_size) :
+    _tflite_model(tflite_model),
+    _tensor_arena(tensor_arena_ptr),
+    _tensor_arena_size(tensor_arena_size),
+    _model(NULL),
+    _interpreter(NULL),
+    _input_tensor(NULL),
+    _output_tensor(NULL),
+    _static_alloc(true)
+{
+}
 MLModel::MLModel(const unsigned char tflite_model[], int tensor_arena_size) :
     _tflite_model(tflite_model),
     _tensor_arena_size(tensor_arena_size),
@@ -17,7 +28,8 @@ MLModel::MLModel(const unsigned char tflite_model[], int tensor_arena_size) :
     _model(NULL),
     _interpreter(NULL),
     _input_tensor(NULL),
-    _output_tensor(NULL)
+    _output_tensor(NULL),
+    _static_alloc(false)
 {
 }
 
@@ -28,7 +40,7 @@ MLModel::~MLModel()
         _interpreter = NULL;
     }
 
-    if (_tensor_arena != NULL) {
+    if (!_static_alloc && _tensor_arena != NULL) {
         delete [] _tensor_arena;
         _tensor_arena = NULL;
     }
@@ -46,7 +58,10 @@ int MLModel::init()
         return 0;
     }
 
-    _tensor_arena = new uint8_t[_tensor_arena_size];
+    if (!_static_alloc) {
+        _tensor_arena = new uint8_t[_tensor_arena_size];
+    }
+    
     if (_tensor_arena == NULL) {
         TF_LITE_REPORT_ERROR(&_error_reporter,
                             "Failed to allocate tensor area of size %d",
