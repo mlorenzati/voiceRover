@@ -34,7 +34,7 @@ extern "C" {
 #define INPUT_BUFFER_SIZE ((FFT_SIZE / 2) * SPECTRUM_SHIFT)
 #define INPUT_SHIFT       0
 #define BIAS_VOLTAGE      1.65
-#define TENSOR_ARENA_SIZE 64 * 1024
+#define TENSOR_ARENA_SIZE 128 * 1024
 
 // microphone configuration
 #if MIC_SETUP == MIC_SETUP_PDM
@@ -75,7 +75,7 @@ q15_t input_q15[INPUT_BUFFER_SIZE + (FFT_SIZE / 2)];
 
 DSPPipeline dsp_pipeline(FFT_SIZE);
 
-static uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
+//static uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
 
 MLModel ml_model(tflite_model, TENSOR_ARENA_SIZE);
 
