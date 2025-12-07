@@ -1,10 +1,3 @@
-/*
- * Copyright (c) 2021 Arm Limited and Contributors. All rights reserved.
- *
- * SPDX-License-Identifier: Apache-2.0
- * 
- */
-
 #include <stdio.h>
 
 #include "pico/stdlib.h"
@@ -22,16 +15,23 @@ extern "C" {
 }
 
 #include "tflite_model.h"
-
 #include "dsp_pipeline.h"
 #include "ml_model.h"
 
 // constants
-#define SAMPLE_RATE       8000
-#define FFT_SIZE          256
-#define HOP_SIZE          80
-#define SPECTRUM_SHIFT    ((FFT_SIZE + HOP_SIZE - 1) / HOP_SIZE)
-#define INPUT_BUFFER_SIZE ((FFT_SIZE / 2) * SPECTRUM_SHIFT)
+#define SAMPLE_RATE                 8000
+#define FFT_SIZE                    256
+#define HOP_SIZE                    80
+#define N_MFCC                      32
+#define SPECTROGRAM_TIME_FRAMES     80
+
+#define SPECTRUM_SHIFT              ((FFT_SIZE + HOP_SIZE - 1) / HOP_SIZE)
+// How many new samples capture per callback
+#define MIC_BLOCK_SAMPLES           (HOP_SIZE * SPECTRUM_SHIFT)
+// How many samples needed to compute SPECTRUM_SHIFT MFCC frames
+#define FFT_FRAME_BUFFER_SAMPLES    (FFT_SIZE + (SPECTRUM_SHIFT - 1) * HOP_SIZE)
+#define N_BINS                      ((FFT_SIZE / 2) + 1)
+
 #define INPUT_SHIFT       0
 #define BIAS_VOLTAGE      1.65
 #define TENSOR_ARENA_SIZE 128 * 1024
@@ -55,31 +55,31 @@ const struct pdm_microphone_config pdm_config = {
     .sample_rate = SAMPLE_RATE,
 
     // number of samples to buffer
-    .sample_buffer_size = INPUT_BUFFER_SIZE,
+    .sample_buffer_size = MIC_BLOCK_SAMPLES,
 };
 #elif MIC_SETUP == MIC_SETUP_ANALOG
+#define MIC_GPIO_ADC 26
+#define MIC_GPIO_GAIN 2
 const struct analog_microphone_config analog_config {
-    .gpio = 26,
+    .gpio = MIC_GPIO_ADC,
     .bias_voltage = BIAS_VOLTAGE,
     .sample_rate = SAMPLE_RATE,
-    .sample_buffer_size = INPUT_BUFFER_SIZE
+    .sample_buffer_size = MIC_BLOCK_SAMPLES
 };
 #else 
 #error "MIC_SETUP not defined!"
 #endif
 
-q15_t capture_buffer_q15[INPUT_BUFFER_SIZE];
-volatile int new_samples_captured = 0;
-
-q15_t input_q15[INPUT_BUFFER_SIZE + (FFT_SIZE / 2)];
-
-DSPPipeline dsp_pipeline(FFT_SIZE);
+q15_t capture_buffer_q15[MIC_BLOCK_SAMPLES];
+q15_t input_q15[FFT_FRAME_BUFFER_SAMPLES];
+DSPPipeline dsp_pipeline(FFT_SIZE, HOP_SIZE, N_MFCC, SPECTROGRAM_TIME_FRAMES);
 
 //static uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
-
 MLModel ml_model(tflite_model, TENSOR_ARENA_SIZE);
-
+volatile int new_samples_captured = 0;
 int8_t* scaled_spectrum = nullptr;
+const size_t tail_samples = FFT_SIZE - HOP_SIZE;
+
 int32_t spectogram_divider;
 float spectrogram_zero_point;
 
@@ -91,17 +91,6 @@ int main( void )
     stdio_init_all();
 
     printf("hello pico Voice Rover!\n");
-
-    gpio_set_function(PICO_DEFAULT_LED_PIN, GPIO_FUNC_PWM);
-    
-    uint pwm_slice_num = pwm_gpio_to_slice_num(PICO_DEFAULT_LED_PIN);
-    uint pwm_chan_num = pwm_gpio_to_channel(PICO_DEFAULT_LED_PIN);
-
-    // Set period of 256 cycles (0 to 255 inclusive)
-    pwm_set_wrap(pwm_slice_num, 256);
-
-    // Set the PWM running
-    pwm_set_enabled(pwm_slice_num, true);
 
     if (!ml_model.init()) {
         printf("Failed to initialize ML model!\n");
@@ -139,6 +128,10 @@ int main( void )
         printf("Analog microphone initialization failed!\n");
         while (1) { tight_loop_contents(); }
     }
+    // Set mic gain
+    gpio_init(MIC_GPIO_GAIN);
+    gpio_set_dir(MIC_GPIO_GAIN, GPIO_OUT);
+    gpio_put(MIC_GPIO_GAIN, 1);
 
     // set callback that is called when all the samples in the library
     // internal sample buffer are ready for reading
@@ -158,20 +151,20 @@ int main( void )
         }
         new_samples_captured = 0;
 
-        dsp_pipeline.shift_spectrogram(scaled_spectrum, SPECTRUM_SHIFT, 124);
+        dsp_pipeline.shift_spectrogram(scaled_spectrum, SPECTRUM_SHIFT);
 
-        // move input buffer values over by INPUT_BUFFER_SIZE samples
-        memmove(input_q15, &input_q15[INPUT_BUFFER_SIZE], (FFT_SIZE / 2));
+        // move input buffer values over by MIC_BLOCK_SAMPLES samples
+        memmove(input_q15, &input_q15[FFT_FRAME_BUFFER_SAMPLES - tail_samples], tail_samples * sizeof(q15_t));
 
         // copy new samples to end of the input buffer with a bit shift of INPUT_SHIFT
-        arm_shift_q15(capture_buffer_q15, INPUT_SHIFT, input_q15 + (FFT_SIZE / 2), INPUT_BUFFER_SIZE);
+        arm_shift_q15(capture_buffer_q15, INPUT_SHIFT, input_q15 + tail_samples, MIC_BLOCK_SAMPLES);
     
         for (int i = 0; i < SPECTRUM_SHIFT; i++) {
-            dsp_pipeline.calculate_spectrum(
-                input_q15 + i * ((FFT_SIZE / 2)),
-                scaled_spectrum + (129 * (124 - SPECTRUM_SHIFT + i)),
-                spectogram_divider, spectrogram_zero_point
-            );
+            const int spect_frame_index = SPECTROGRAM_TIME_FRAMES - SPECTRUM_SHIFT + i;
+            int8_t* spect_ptr = scaled_spectrum + (N_MFCC * spect_frame_index);
+            const int start_sample = i * HOP_SIZE;
+            
+            dsp_pipeline.calculate_mfcc(input_q15 + start_sample, spect_ptr, spectogram_divider, spectrogram_zero_point);
         }
 
         float prediction = ml_model.predict();
@@ -181,8 +174,6 @@ int main( void )
         } else {
           printf("\t🔕\tNOT detected\t(prediction = %f)\n\n", prediction);
         }
-
-        pwm_set_chan_level(pwm_slice_num, pwm_chan_num, prediction * 255);
     }
 
     return 0;
@@ -193,10 +184,10 @@ int main( void )
 // read in the new samples
 #if MIC_SETUP == MIC_SETUP_PDM
 void on_mic_samples_ready() {
-    new_samples_captured = pdm_microphone_read(capture_buffer_q15, INPUT_BUFFER_SIZE);
+    new_samples_captured = pdm_microphone_read(capture_buffer_q15, MIC_BLOCK_SAMPLES);
 }
 #elif MIC_SETUP == MIC_SETUP_ANALOG
 void on_mic_samples_ready() {
-    new_samples_captured = analog_microphone_read(capture_buffer_q15, INPUT_BUFFER_SIZE);
+    new_samples_captured = analog_microphone_read(capture_buffer_q15, MIC_BLOCK_SAMPLES);
 }
 #endif
