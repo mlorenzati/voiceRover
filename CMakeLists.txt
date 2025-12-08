@@ -67,7 +67,7 @@ pico_add_extra_outputs(pico_voice_rover)
 
 add_subdirectory("lib/microphone-library-for-pico" EXCLUDE_FROM_ALL)
 add_subdirectory("lib/pico-tflmicro" EXCLUDE_FROM_ALL)
-
+add_subdirectory("test")
 
 # === Auto-patch pico-tflmicro ===
 execute_process(

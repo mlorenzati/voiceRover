@@ -1,0 +1,17 @@
+add_executable(record_play_test
+    main.c
+)
+
+# pull in common dependencies
+target_link_libraries(record_play_test 
+    hardware_pwm
+    pico_analog_microphone
+    pico_stdlib
+)
+
+# create map/bin/hex file etc.
+pico_add_extra_outputs(record_play_test)
+
+# enable usb output, disable uart output
+pico_enable_stdio_usb(record_play_test 1)
+pico_enable_stdio_uart(record_play_test 0)

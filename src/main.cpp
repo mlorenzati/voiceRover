@@ -33,7 +33,7 @@ extern "C" {
 #define N_BINS                      ((FFT_SIZE / 2) + 1)
 
 #define INPUT_SHIFT       0
-#define BIAS_VOLTAGE      1.65
+#define BIAS_VOLTAGE      1.25
 #define TENSOR_ARENA_SIZE 128 * 1024
 
 // microphone configuration
@@ -60,7 +60,7 @@ const struct pdm_microphone_config pdm_config = {
 #elif MIC_SETUP == MIC_SETUP_ANALOG
 #define MIC_GPIO_ADC 26
 #define MIC_GPIO_GAIN 2
-const struct analog_microphone_config analog_config {
+const struct analog_microphone_config analog_config = {
     .gpio = MIC_GPIO_ADC,
     .bias_voltage = BIAS_VOLTAGE,
     .sample_rate = SAMPLE_RATE,

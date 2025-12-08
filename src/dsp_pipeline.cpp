@@ -98,7 +98,7 @@ void DSPPipeline::calculate_mfcc(const int16_t* input, int8_t* output, int32_t m
 }
 
 void DSPPipeline::shift_spectrogram(int8_t* spectrogram, int shift_amount) {
-       if (shift_amount <= 0) return;
+    if (shift_amount <= 0) return;
     if (shift_amount >= _time_frames) {
         // clear all frames
         memset(spectrogram, 0, _n_mfcc * _time_frames * sizeof(int8_t));
